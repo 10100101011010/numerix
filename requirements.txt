@@ -1,0 +1,7 @@
+rich>=13.7
+questionary>=2.0
+sympy>=1.12
+numpy>=1.26
+matplotlib>=3.8
+pytest>=8.0
+pyinstaller>=6.3

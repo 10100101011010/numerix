@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "numerix"
+version = "0.1.0"
+description = "A cross-platform terminal application implementing classical numerical methods from first principles."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Numerix Contributors" }
+]
+keywords = ["numerical-methods", "cli", "tui", "root-finding", "linear-algebra", "interpolation", "integration"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "rich>=13.7",
+    "questionary>=2.0",
+    "sympy>=1.12",
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pyinstaller>=6.3",
+]
+
+[project.scripts]
+numerix = "numerix.main:main"
+
+[tool.setuptools.packages.find]
+include = ["numerix*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
