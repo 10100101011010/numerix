@@ -147,7 +147,12 @@ def parse_function(text: str, variables: str | tuple[str, ...] = "x") -> ParsedF
         expr = parse_expr(
             stripped,
             local_dict=local_dict,
-            global_dict={},          # no builtins, no implicit `from sympy import *`
+            global_dict={
+                "Integer": sympy.Integer,
+                "Float": sympy.Float,
+                "Rational": sympy.Rational,
+                "Symbol": sympy.Symbol,
+            },
             transformations=_TRANSFORMATIONS,
             evaluate=True,
         )
