@@ -227,3 +227,64 @@ def collect_iterative_system_inputs() -> Optional[dict[str, Any]]:
         return None
 
     return {"A": A, "b": b, "x0": x0, "tol": float(tol_answer), "max_iter": int(max_iter_answer)}
+
+
+# ----------------------------------------------------------------------
+# Point collection (§6.4, Interpolation)
+# ----------------------------------------------------------------------
+# Interpolation methods take a set of (x, y) data points plus a
+# target x, rather than the linear-systems' matrix/vector shape or
+# the nonlinear category's flat scalar fields, so they get their own
+# collectors too.
+
+def collect_points(n: int) -> Optional[tuple[list[float], list[float]]]:
+    """Prompt for n (x, y) data points, one x and one y per point."""
+    import questionary
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for i in range(n):
+        x_answer = questionary.text(f"x_{i + 1}:", validate=_validate_float).ask()
+        if x_answer is None:
+            return None
+        y_answer = questionary.text(f"y_{i + 1} = f(x_{i + 1}):", validate=_validate_float).ask()
+        if y_answer is None:
+            return None
+        xs.append(float(x_answer))
+        ys.append(float(y_answer))
+    return xs, ys
+
+
+def collect_fixed_interpolation_inputs(n: int) -> Optional[dict[str, Any]]:
+    """Collect xs, ys (fixed count n) and x_target -- for linear/quadratic/cubic."""
+    import questionary
+
+    points = collect_points(n)
+    if points is None:
+        return None
+    xs, ys = points
+
+    x_target_answer = questionary.text("x_target:", validate=_validate_float).ask()
+    if x_target_answer is None:
+        return None
+    return {"xs": xs, "ys": ys, "x_target": float(x_target_answer)}
+
+
+def collect_linear_inputs() -> Optional[dict[str, Any]]:
+    return collect_fixed_interpolation_inputs(2)
+
+
+def collect_quadratic_inputs() -> Optional[dict[str, Any]]:
+    return collect_fixed_interpolation_inputs(3)
+
+
+def collect_cubic_inputs() -> Optional[dict[str, Any]]:
+    return collect_fixed_interpolation_inputs(4)
+
+
+def collect_variable_interpolation_inputs() -> Optional[dict[str, Any]]:
+    """Collect n, xs, ys, and x_target -- for Lagrange / Newton divided-difference / Newton-Gregory."""
+    n = _prompt_dimension("Number of points (n)", default=4)
+    if n is None:
+        return None
+    return collect_fixed_interpolation_inputs(n)

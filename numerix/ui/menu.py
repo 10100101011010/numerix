@@ -16,6 +16,15 @@ from typing import Any, Callable, Optional
 
 from rich.console import Console
 
+from numerix.core.interpolation import (
+    cubic,
+    lagrange,
+    linear,
+    newton_divided_diff,
+    newton_gregory_backward,
+    newton_gregory_forward,
+    quadratic,
+)
 from numerix.core.linear_systems import (
     gauss_elimination,
     gauss_jordan,
@@ -63,10 +72,20 @@ _LINEAR_SYSTEMS_METHODS: list[MethodEntry] = [
     MethodEntry("Gauss-Seidel", prompts.collect_iterative_system_inputs, gauss_seidel),
 ]
 
+_INTERPOLATION_METHODS: list[MethodEntry] = [
+    MethodEntry("Linear Interpolation", prompts.collect_linear_inputs, linear),
+    MethodEntry("Quadratic Interpolation", prompts.collect_quadratic_inputs, quadratic),
+    MethodEntry("Cubic Interpolation", prompts.collect_cubic_inputs, cubic),
+    MethodEntry("Lagrange Interpolation", prompts.collect_variable_interpolation_inputs, lagrange),
+    MethodEntry("Newton Divided Difference", prompts.collect_variable_interpolation_inputs, newton_divided_diff),
+    MethodEntry("Newton-Gregory Forward", prompts.collect_variable_interpolation_inputs, newton_gregory_forward),
+    MethodEntry("Newton-Gregory Backward", prompts.collect_variable_interpolation_inputs, newton_gregory_backward),
+]
+
 _CATEGORIES: dict[str, list[MethodEntry]] = {
     "Nonlinear Equations": _NONLINEAR_METHODS,
     "Linear Systems": _LINEAR_SYSTEMS_METHODS,
-    "Interpolation": [],
+    "Interpolation": _INTERPOLATION_METHODS,
     "Numerical Integration": [],
 }
 
