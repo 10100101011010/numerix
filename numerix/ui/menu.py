@@ -2,21 +2,28 @@
 ui/menu.py — category -> method -> input navigation (§7), via
 questionary arrow-key select menus.
 
-Only the "Nonlinear Equations" category is wired to real methods in
-this phase. The other three categories already appear in the menu
-(so the shape of the app doesn't change out from under Phases 6-8),
-but selecting one just shows a "not implemented yet" message rather
-than crashing — consistent with §8's "no unhandled exceptions reach
-the user under any input".
+"Nonlinear Equations" and "Linear Systems" are fully wired to real
+methods. Interpolation and Numerical Integration still show a "not
+implemented yet" message if chosen (Phases 7-8) rather than crashing
+— consistent with §8's "no unhandled exceptions reach the user under
+any input".
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable, Optional
 
 from rich.console import Console
 
+from numerix.core.linear_systems import (
+    gauss_elimination,
+    gauss_jordan,
+    gauss_seidel,
+    jacobi,
+    lu_decomposition,
+    matrix_inverse,
+)
 from numerix.core.nonlinear import bisection, fixed_point, newton_raphson, regula_falsi, secant
 from numerix.ui import prompts
 from numerix.ui.display import render_error, render_result
@@ -30,21 +37,35 @@ _EXIT = "Exit"
 @dataclass(frozen=True)
 class MethodEntry:
     label: str
-    fields: list[prompts.Field]
+    collect: Callable[[], Optional[dict[str, Any]]]
     run: Callable[..., object]
 
 
+def _scalar_collector(fields: list[prompts.Field]) -> Callable[[], Optional[dict[str, Any]]]:
+    """Wrap a `Field` list for the generic scalar-input collection path (nonlinear methods)."""
+    return lambda: prompts.collect_inputs(fields)
+
+
 _NONLINEAR_METHODS: list[MethodEntry] = [
-    MethodEntry("Bisection", prompts.BISECTION_FIELDS, bisection),
-    MethodEntry("Regula Falsi", prompts.REGULA_FALSI_FIELDS, regula_falsi),
-    MethodEntry("Fixed Point", prompts.FIXED_POINT_FIELDS, fixed_point),
-    MethodEntry("Newton-Raphson", prompts.NEWTON_RAPHSON_FIELDS, newton_raphson),
-    MethodEntry("Secant", prompts.SECANT_FIELDS, secant),
+    MethodEntry("Bisection", _scalar_collector(prompts.BISECTION_FIELDS), bisection),
+    MethodEntry("Regula Falsi", _scalar_collector(prompts.REGULA_FALSI_FIELDS), regula_falsi),
+    MethodEntry("Fixed Point", _scalar_collector(prompts.FIXED_POINT_FIELDS), fixed_point),
+    MethodEntry("Newton-Raphson", _scalar_collector(prompts.NEWTON_RAPHSON_FIELDS), newton_raphson),
+    MethodEntry("Secant", _scalar_collector(prompts.SECANT_FIELDS), secant),
+]
+
+_LINEAR_SYSTEMS_METHODS: list[MethodEntry] = [
+    MethodEntry("Gaussian Elimination", prompts.collect_direct_system_inputs, gauss_elimination),
+    MethodEntry("Gauss-Jordan", prompts.collect_direct_system_inputs, gauss_jordan),
+    MethodEntry("Matrix Inverse", prompts.collect_matrix_only_inputs, matrix_inverse),
+    MethodEntry("LU Decomposition", prompts.collect_direct_system_inputs, lu_decomposition),
+    MethodEntry("Jacobi", prompts.collect_iterative_system_inputs, jacobi),
+    MethodEntry("Gauss-Seidel", prompts.collect_iterative_system_inputs, gauss_seidel),
 ]
 
 _CATEGORIES: dict[str, list[MethodEntry]] = {
     "Nonlinear Equations": _NONLINEAR_METHODS,
-    "Linear Systems": [],
+    "Linear Systems": _LINEAR_SYSTEMS_METHODS,
     "Interpolation": [],
     "Numerical Integration": [],
 }
@@ -96,7 +117,7 @@ def _run_category(category: str) -> None:
 def _run_method(entry: MethodEntry) -> None:
     import questionary
 
-    values = prompts.collect_inputs(entry.fields)
+    values = entry.collect()
     if values is None:
         return  # user cancelled input part-way through
 

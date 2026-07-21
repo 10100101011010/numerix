@@ -123,3 +123,107 @@ SECANT_FIELDS: list[Field] = [
     Field("tol", "tol", "float", 1e-6),
     Field("max_iter", "max_iter", "int", 100),
 ]
+
+
+# ----------------------------------------------------------------------
+# Matrix/vector collection (§6.3, Linear Systems)
+# ----------------------------------------------------------------------
+# Linear systems methods take a matrix + vector(s) rather than a flat
+# list of scalar fields, so they get their own collectors instead of
+# going through `Field`/`collect_inputs` above.
+
+def _prompt_dimension(label: str = "System size (n)", default: int = 3) -> Optional[int]:
+    import questionary
+
+    answer = questionary.text(f"{label}:", default=str(default), validate=_validate_int).ask()
+    if answer is None:
+        return None
+    return int(answer)
+
+
+def _prompt_row(label: str, n: int) -> Optional[list[float]]:
+    import questionary
+
+    def _validate_row(text: str) -> "bool | str":
+        parts = [p.strip() for p in text.split(",") if p.strip() != ""]
+        if len(parts) != n:
+            return f"enter exactly {n} comma-separated number(s), got {len(parts)}"
+        for p in parts:
+            try:
+                float(p)
+            except ValueError:
+                return f"'{p}' is not a valid number"
+        return True
+
+    answer = questionary.text(f"{label} ({n} comma-separated values):", validate=_validate_row).ask()
+    if answer is None:
+        return None
+    return [float(p.strip()) for p in answer.split(",") if p.strip() != ""]
+
+
+def collect_matrix(n: int, label: str = "A") -> Optional[list[list[float]]]:
+    """Prompt for an n x n matrix, one row at a time."""
+    rows: list[list[float]] = []
+    for i in range(n):
+        row = _prompt_row(f"{label} row {i + 1}", n)
+        if row is None:
+            return None
+        rows.append(row)
+    return rows
+
+
+def collect_vector(n: int, label: str = "b") -> Optional[list[float]]:
+    """Prompt for a single length-n vector."""
+    return _prompt_row(label, n)
+
+
+def collect_direct_system_inputs() -> Optional[dict[str, Any]]:
+    """Collect A, b for the direct solvers: Gaussian elimination, Gauss-Jordan, LU."""
+    n = _prompt_dimension()
+    if n is None:
+        return None
+    A = collect_matrix(n, "A")
+    if A is None:
+        return None
+    b = collect_vector(n, "b")
+    if b is None:
+        return None
+    return {"A": A, "b": b}
+
+
+def collect_matrix_only_inputs() -> Optional[dict[str, Any]]:
+    """Collect A only, for matrix inverse."""
+    n = _prompt_dimension("Matrix size (n)")
+    if n is None:
+        return None
+    A = collect_matrix(n, "A")
+    if A is None:
+        return None
+    return {"A": A}
+
+
+def collect_iterative_system_inputs() -> Optional[dict[str, Any]]:
+    """Collect A, b, x0, tol, max_iter for Jacobi / Gauss-Seidel."""
+    import questionary
+
+    n = _prompt_dimension()
+    if n is None:
+        return None
+    A = collect_matrix(n, "A")
+    if A is None:
+        return None
+    b = collect_vector(n, "b")
+    if b is None:
+        return None
+    x0 = collect_vector(n, "x0 (initial guess)")
+    if x0 is None:
+        return None
+
+    tol_answer = questionary.text("tol:", default="1e-6", validate=_validate_float).ask()
+    if tol_answer is None:
+        return None
+    max_iter_answer = questionary.text("max_iter:", default="100", validate=_validate_int).ask()
+    if max_iter_answer is None:
+        return None
+
+    return {"A": A, "b": b, "x0": x0, "tol": float(tol_answer), "max_iter": int(max_iter_answer)}
