@@ -16,6 +16,13 @@ from typing import Any, Callable, Optional
 
 from rich.console import Console
 
+from numerix.core.integration import (
+    midpoint_rule,
+    rectangle_rule,
+    simpson_1_3,
+    simpson_3_8,
+    trapezoidal_rule,
+)
 from numerix.core.interpolation import (
     cubic,
     lagrange,
@@ -82,11 +89,19 @@ _INTERPOLATION_METHODS: list[MethodEntry] = [
     MethodEntry("Newton-Gregory Backward", prompts.collect_variable_interpolation_inputs, newton_gregory_backward),
 ]
 
+_INTEGRATION_METHODS: list[MethodEntry] = [
+    MethodEntry("Rectangle Rule", _scalar_collector(prompts.RECTANGLE_FIELDS), rectangle_rule),
+    MethodEntry("Midpoint Rule", _scalar_collector(prompts.MIDPOINT_FIELDS), midpoint_rule),
+    MethodEntry("Trapezoidal Rule", _scalar_collector(prompts.TRAPEZOIDAL_FIELDS), trapezoidal_rule),
+    MethodEntry("Simpson's 1/3 Rule", _scalar_collector(prompts.SIMPSON_1_3_FIELDS), simpson_1_3),
+    MethodEntry("Simpson's 3/8 Rule", _scalar_collector(prompts.SIMPSON_3_8_FIELDS), simpson_3_8),
+]
+
 _CATEGORIES: dict[str, list[MethodEntry]] = {
     "Nonlinear Equations": _NONLINEAR_METHODS,
     "Linear Systems": _LINEAR_SYSTEMS_METHODS,
     "Interpolation": _INTERPOLATION_METHODS,
-    "Numerical Integration": [],
+    "Numerical Integration": _INTEGRATION_METHODS,
 }
 
 

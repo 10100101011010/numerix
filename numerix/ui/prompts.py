@@ -126,6 +126,42 @@ SECANT_FIELDS: list[Field] = [
 
 
 # ----------------------------------------------------------------------
+# Field specs per numerical integration method (§6.5 "Required inputs")
+# ----------------------------------------------------------------------
+
+RECTANGLE_FIELDS: list[Field] = [
+    Field("f", "f(x) =", "text", "x**2"),
+    Field("a", "a", "float", 0.0),
+    Field("b", "b", "float", 1.0),
+    Field("n", "n", "int", 10),
+    Field("side", "side (left/right)", "text", "left"),
+]
+
+MIDPOINT_FIELDS: list[Field] = [
+    Field("f", "f(x) =", "text", "x**2"),
+    Field("a", "a", "float", 0.0),
+    Field("b", "b", "float", 1.0),
+    Field("n", "n", "int", 10),
+]
+
+TRAPEZOIDAL_FIELDS: list[Field] = MIDPOINT_FIELDS  # identical required inputs (§6.5)
+
+SIMPSON_1_3_FIELDS: list[Field] = [
+    Field("f", "f(x) =", "text", "x**2"),
+    Field("a", "a", "float", 0.0),
+    Field("b", "b", "float", 1.0),
+    Field("n", "n (must be even)", "int", 10),
+]
+
+SIMPSON_3_8_FIELDS: list[Field] = [
+    Field("f", "f(x) =", "text", "x**2"),
+    Field("a", "a", "float", 0.0),
+    Field("b", "b", "float", 1.0),
+    Field("n", "n (must be divisible by 3)", "int", 9),
+]
+
+
+# ----------------------------------------------------------------------
 # Matrix/vector collection (§6.3, Linear Systems)
 # ----------------------------------------------------------------------
 # Linear systems methods take a matrix + vector(s) rather than a flat
