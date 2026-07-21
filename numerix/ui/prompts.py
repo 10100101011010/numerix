@@ -126,6 +126,50 @@ SECANT_FIELDS: list[Field] = [
 
 
 # ----------------------------------------------------------------------
+# Comparison mode (§7, Nonlinear Equations)
+# ----------------------------------------------------------------------
+
+def collect_comparison_inputs() -> Optional[dict[str, Any]]:
+    """Collect one shared nonlinear "problem" for comparison mode.
+
+    A single f(x) plus two points, reused as (a, b) for the bracket
+    methods (Bisection/Regula Falsi) and as (x0, x1) for
+    Newton-Raphson (x0 only) / Secant (x0 and x1) -- so "the same
+    problem" (§7) means the same function and the same two numbers,
+    interpreted per-method by the caller.
+    """
+    import questionary
+
+    f_answer = questionary.text("f(x) =:", default="x**3 - x - 2", validate=_validate_text).ask()
+    if f_answer is None:
+        return None
+    a_answer = questionary.text(
+        "First point (bracket 'a' / starting point 'x0'):", default="1.0", validate=_validate_float
+    ).ask()
+    if a_answer is None:
+        return None
+    b_answer = questionary.text(
+        "Second point (bracket 'b' / secant's 'x1'):", default="2.0", validate=_validate_float
+    ).ask()
+    if b_answer is None:
+        return None
+    tol_answer = questionary.text("tol:", default="1e-6", validate=_validate_float).ask()
+    if tol_answer is None:
+        return None
+    max_iter_answer = questionary.text("max_iter:", default="100", validate=_validate_int).ask()
+    if max_iter_answer is None:
+        return None
+
+    return {
+        "f": f_answer,
+        "a": float(a_answer),
+        "b": float(b_answer),
+        "tol": float(tol_answer),
+        "max_iter": int(max_iter_answer),
+    }
+
+
+# ----------------------------------------------------------------------
 # Field specs per numerical integration method (§6.5 "Required inputs")
 # ----------------------------------------------------------------------
 

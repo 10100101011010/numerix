@@ -2,11 +2,10 @@
 ui/menu.py — category -> method -> input navigation (§7), via
 questionary arrow-key select menus.
 
-"Nonlinear Equations" and "Linear Systems" are fully wired to real
-methods. Interpolation and Numerical Integration still show a "not
-implemented yet" message if chosen (Phases 7-8) rather than crashing
-— consistent with §8's "no unhandled exceptions reach the user under
-any input".
+All four categories are fully wired to real methods. The Nonlinear
+Equations category additionally offers a "Compare Methods" entry
+(§7 comparison mode), and every single-method run offers to export
+its `MethodResult` to `results/` as CSV or JSON (§7 export).
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from rich.console import Console
+from rich.table import Table
 
 from numerix.core.integration import (
     midpoint_rule,
@@ -48,6 +48,8 @@ console = Console()
 
 _BACK = "\u00ab Back"
 _EXIT = "Exit"
+_COMPARE = "\u2696 Compare Methods"
+_RESULTS_DIR = "results"
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,19 @@ _CATEGORIES: dict[str, list[MethodEntry]] = {
     "Numerical Integration": _INTEGRATION_METHODS,
 }
 
+# Comparison mode (§7): pick 2+ methods from the same category, run on
+# the same problem, show a summary table side by side. Scoped to the
+# nonlinear category per Phase 9 / §7 ("applies most usefully to the
+# nonlinear category"). "Fixed Point" is deliberately excluded: it
+# takes a rearranged g(x), not the f(x)/bracket shape shared by the
+# other four, so it can't run on "the same problem" as they can.
+_COMPARISON_CANDIDATES: dict[str, Callable[..., object]] = {
+    "Bisection": bisection,
+    "Regula Falsi": regula_falsi,
+    "Newton-Raphson": newton_raphson,
+    "Secant": secant,
+}
+
 
 def run_menu() -> None:
     """Top-level menu loop: category -> method -> input -> result -> loop.
@@ -136,13 +151,18 @@ def _run_category(category: str) -> None:
         return
 
     while True:
-        choice = questionary.select(
-            f"{category} \u2014 choose a method:",
-            choices=[m.label for m in methods] + [_BACK],
-        ).ask()
+        choices = [m.label for m in methods]
+        if category == "Nonlinear Equations":
+            choices.append(_COMPARE)
+        choices.append(_BACK)
+
+        choice = questionary.select(f"{category} \u2014 choose a method:", choices=choices).ask()
 
         if choice is None or choice == _BACK:
             return
+        if choice == _COMPARE:
+            _run_nonlinear_comparison()
+            continue
 
         entry = next(m for m in methods if m.label == choice)
         _run_method(entry)
@@ -165,4 +185,109 @@ def _run_method(entry: MethodEntry) -> None:
         return
 
     render_result(result, console)
+    _offer_export(result)
     questionary.text("Press Enter to continue...").ask()
+
+
+# ----------------------------------------------------------------------
+# Comparison mode (§7)
+# ----------------------------------------------------------------------
+
+def _run_nonlinear_comparison() -> None:
+    """Pick 2+ nonlinear methods, run them on the same problem, show a
+    summary table side by side (§7).
+    """
+    import questionary
+
+    values = prompts.collect_comparison_inputs()
+    if values is None:
+        return  # user cancelled part-way through
+
+    selected = questionary.checkbox(
+        "Select 2+ methods to compare (space to toggle, enter to confirm):",
+        choices=list(_COMPARISON_CANDIDATES.keys()),
+    ).ask()
+
+    if not selected:
+        return  # user cancelled (Ctrl+C) or confirmed with nothing selected
+    if len(selected) < 2:
+        render_error("pick at least 2 methods to compare.", console)
+        return
+
+    f, a, b, tol, max_iter = values["f"], values["a"], values["b"], values["tol"], values["max_iter"]
+    results: dict[str, object] = {}
+    errors: dict[str, str] = {}
+
+    for label in selected:
+        try:
+            if label in ("Bisection", "Regula Falsi"):
+                results[label] = _COMPARISON_CANDIDATES[label](f, a, b, tol=tol, max_iter=max_iter)
+            elif label == "Newton-Raphson":
+                results[label] = newton_raphson(f, a, tol=tol, max_iter=max_iter)
+            else:  # Secant
+                results[label] = secant(f, a, b, tol=tol, max_iter=max_iter)
+        except ValueError as exc:
+            errors[label] = str(exc)
+        except Exception as exc:  # noqa: BLE001 -- last-resort safety net, per §8
+            errors[label] = f"unexpected error: {exc}"
+
+    _render_comparison_table(selected, results, errors)
+
+    if results:
+        _offer_export_many(results)
+    questionary.text("Press Enter to continue...").ask()
+
+
+def _render_comparison_table(order: list[str], results: dict, errors: dict) -> None:
+    """Summary table: method, iterations, final error, converged? (§7)."""
+    table = Table(title="Comparison", header_style="bold magenta")
+    table.add_column("Method")
+    table.add_column("Iterations", justify="right")
+    table.add_column("Final Error", justify="right")
+    table.add_column("Converged?")
+
+    for label in order:
+        if label in errors:
+            table.add_row(label, "\u2014", "\u2014", f"[red]\u2717 {errors[label]}[/red]")
+            continue
+        result = results[label]
+        converged_cell = "[green]\u2713[/green]" if result.converged else "[red]\u2717[/red]"
+        error_cell = f"{result.approx_error:.6g}" if result.approx_error is not None else "\u2014"
+        table.add_row(label, str(result.n_iterations), error_cell, converged_cell)
+
+    console.print(table)
+
+
+# ----------------------------------------------------------------------
+# Export (§7): offer to save any MethodResult to results/ as CSV/JSON
+# ----------------------------------------------------------------------
+
+def _offer_export(result) -> None:
+    import questionary
+
+    choice = questionary.select("Export this result?", choices=["Skip", "Save as CSV", "Save as JSON"]).ask()
+    if choice in (None, "Skip"):
+        return
+    fmt = "csv" if choice == "Save as CSV" else "json"
+    try:
+        path = result.save(_RESULTS_DIR, fmt)
+        console.print(f"[green]Saved to {path}[/green]")
+    except Exception as exc:  # noqa: BLE001 -- exporting must never crash the app
+        render_error(f"could not save export: {exc}", console)
+
+
+def _offer_export_many(results: dict) -> None:
+    import questionary
+
+    choice = questionary.select(
+        "Export these results?", choices=["Skip", "Save all as CSV", "Save all as JSON"]
+    ).ask()
+    if choice in (None, "Skip"):
+        return
+    fmt = "csv" if choice == "Save all as CSV" else "json"
+    for result in results.values():
+        try:
+            path = result.save(_RESULTS_DIR, fmt)
+            console.print(f"[green]Saved to {path}[/green]")
+        except Exception as exc:  # noqa: BLE001
+            render_error(f"could not save export: {exc}", console)
