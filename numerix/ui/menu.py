@@ -4,8 +4,10 @@ questionary arrow-key select menus.
 
 All four categories are fully wired to real methods. The Nonlinear
 Equations category additionally offers a "Compare Methods" entry
-(§7 comparison mode), and every single-method run offers to export
-its `MethodResult` to `results/` as CSV or JSON (§7 export).
+(§7 comparison mode), every single-method run offers to export its
+`MethodResult` to `results/` as CSV or JSON (§7 export), and offers
+an optional plot (§7 plotting) unless disabled via the `--no-plot`
+flag or the in-menu toggle.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ from numerix.core.linear_systems import (
     matrix_inverse,
 )
 from numerix.core.nonlinear import bisection, fixed_point, newton_raphson, regula_falsi, secant
-from numerix.ui import prompts
+from numerix.ui import plots, prompts
 from numerix.ui.display import render_error, render_result
 
 console = Console()
@@ -49,7 +51,18 @@ console = Console()
 _BACK = "\u00ab Back"
 _EXIT = "Exit"
 _COMPARE = "\u2696 Compare Methods"
+_TOGGLE_PLOTS = "\u2699 Toggle Plotting"
 _RESULTS_DIR = "results"
+
+
+class _Settings:
+    """Small mutable session state (currently just the plot toggle),
+    threaded through the menu loop rather than made global so tests
+    can drive `run_menu()` repeatedly without leaking state.
+    """
+
+    def __init__(self, plot_enabled: bool) -> None:
+        self.plot_enabled = plot_enabled
 
 
 @dataclass(frozen=True)
@@ -120,28 +133,40 @@ _COMPARISON_CANDIDATES: dict[str, Callable[..., object]] = {
 }
 
 
-def run_menu() -> None:
+def run_menu(plot_enabled: bool = True) -> None:
     """Top-level menu loop: category -> method -> input -> result -> loop.
+
+    `plot_enabled` mirrors the `--no-plot` CLI flag (§7): pass
+    `plot_enabled=False` to suppress plot offers for the whole
+    session. It can also be flipped mid-session via the in-menu
+    "Toggle Plotting" entry.
 
     Imports `questionary` lazily so this module (and its navigation
     logic) can still be imported and exercised without a real TTY.
     """
     import questionary
 
+    settings = _Settings(plot_enabled)
+
     while True:
+        status = "ON" if settings.plot_enabled else "OFF"
+        console.print(f"[dim](Plotting: {status})[/dim]")
         category = questionary.select(
             "Numerix — choose a category:",
-            choices=list(_CATEGORIES.keys()) + [_EXIT],
+            choices=list(_CATEGORIES.keys()) + [_TOGGLE_PLOTS, _EXIT],
         ).ask()
 
         if category is None or category == _EXIT:
             console.print("[dim]Goodbye.[/dim]")
             return
+        if category == _TOGGLE_PLOTS:
+            settings.plot_enabled = not settings.plot_enabled
+            continue
 
-        _run_category(category)
+        _run_category(category, settings)
 
 
-def _run_category(category: str) -> None:
+def _run_category(category: str, settings: _Settings) -> None:
     import questionary
 
     methods = _CATEGORIES[category]
@@ -165,10 +190,10 @@ def _run_category(category: str) -> None:
             continue
 
         entry = next(m for m in methods if m.label == choice)
-        _run_method(entry)
+        _run_method(entry, settings)
 
 
-def _run_method(entry: MethodEntry) -> None:
+def _run_method(entry: MethodEntry, settings: _Settings) -> None:
     import questionary
 
     values = entry.collect()
@@ -186,6 +211,8 @@ def _run_method(entry: MethodEntry) -> None:
 
     render_result(result, console)
     _offer_export(result)
+    if settings.plot_enabled:
+        _offer_plot(result)
     questionary.text("Press Enter to continue...").ask()
 
 
@@ -256,6 +283,14 @@ def _render_comparison_table(order: list[str], results: dict, errors: dict) -> N
         table.add_row(label, str(result.n_iterations), error_cell, converged_cell)
 
     console.print(table)
+
+
+def _offer_plot(result) -> None:
+    import questionary
+
+    choice = questionary.select("Show a plot of this result?", choices=["Skip", "Yes"]).ask()
+    if choice == "Yes":
+        plots.plot_result(result, console)
 
 
 # ----------------------------------------------------------------------
