@@ -10,21 +10,20 @@ straight into the matching `core` function.
 
 Every prompt shows a short inline example. That example is always a
 real, working `default=` — pressing Enter accepts it as-is, typing
-anything overrides it. Nothing in this file shows an example via
-`instruction=` alone without also wiring it up as `default=`: a
-hint that looks usable but isn't (submits empty text and fails
-validation on Enter) is treated as a bug here, not a style choice.
+anything overrides it.
 
 Placeholder rule for *sequential same-kind* prompts (matrix rows,
 interpolation points): the example must vary per position and, taken
-literally as a full answer (i.e. accepted by pressing Enter through
-every prompt), must produce valid, non-degenerate input -- distinct
-x-values for interpolation points, a non-singular matrix for matrix
-rows. A single fixed example repeated at every prompt (e.g. always
-"2, -1, 0") would walk a user who just hits Enter repeatedly straight
-into duplicate x-values or a singular matrix, so those placeholders
-are generated per-index instead of hardcoded. See
+literally (i.e. accepted by pressing Enter through every prompt),
+must produce valid, non-degenerate input -- distinct x-values for
+interpolation points, a non-singular matrix for matrix rows. See
 `_matrix_row_placeholder` and the `collect_points` placeholders below.
+
+This module also collects the shared "same problem" inputs for
+comparison mode (§7) in each of the four categories:
+`collect_comparison_inputs` (nonlinear), `collect_linear_comparison_inputs`,
+`collect_variable_interpolation_inputs` (reused as-is for interpolation
+comparison), and `collect_integration_comparison_inputs`.
 """
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ from typing import Any, Callable, Optional
 
 @dataclass(frozen=True)
 class Field:
-    name: str                                         # kwarg name expected by the core function
+    name: str                                          # kwarg name expected by the core function
     label: str                                         # text shown to the user
     kind: str                                          # "text" | "float" | "int" | "select"
     default: Any = None
@@ -139,9 +138,6 @@ def collect_inputs(fields: list[Field]) -> Optional[dict[str, Any]]:
 # ----------------------------------------------------------------------
 # Field specs per nonlinear method (§6.2 "Required inputs")
 # ----------------------------------------------------------------------
-# Every field here appears once per method (no looped/sequential
-# same-kind prompts). Each already carries a real `default=` matching
-# its `placeholder=` -- audited, no change needed.
 
 BISECTION_FIELDS: list[Field] = [
     Field("f", "f(x) =", "text", "x**3 - x - 2", placeholder="x**3 - x - 2"),
@@ -179,8 +175,6 @@ SECANT_FIELDS: list[Field] = [
 # ----------------------------------------------------------------------
 # Comparison mode (§7, Nonlinear Equations)
 # ----------------------------------------------------------------------
-# f / a / b / tol / max_iter, each asked once, each with a real
-# default= already -- audited, no change needed.
 
 def collect_comparison_inputs() -> Optional[dict[str, Any]]:
     """Collect one shared nonlinear "problem" for comparison mode.
@@ -237,8 +231,6 @@ def collect_comparison_inputs() -> Optional[dict[str, Any]]:
 # ----------------------------------------------------------------------
 # Field specs per numerical integration method (§6.5 "Required inputs")
 # ----------------------------------------------------------------------
-# f / a / b / n / side, each asked once, each with a real default=
-# already -- audited, no change needed.
 
 RECTANGLE_FIELDS: list[Field] = [
     Field("f", "f(x) =", "text", "x**2", placeholder="x**2"),
@@ -279,6 +271,37 @@ SIMPSON_3_8_FIELDS: list[Field] = [
 
 
 # ----------------------------------------------------------------------
+# Comparison mode (§7, Numerical Integration)
+# ----------------------------------------------------------------------
+
+COMPARISON_INTEGRATION_FIELDS: list[Field] = [
+    Field("f", "f(x) =", "text", "x**2", placeholder="x**2"),
+    Field("a", "a", "float", 0.0, placeholder="0.0"),
+    Field("b", "b", "float", 1.0, placeholder="1.0"),
+    Field(
+        "n",
+        "n (all 5 rules run on this -- pick a value divisible by 6 so both "
+        "Simpson's 1/3 [needs even] and 3/8 [needs div. by 3] can run)",
+        "int",
+        12,
+        placeholder="12",
+    ),
+]
+
+
+def collect_integration_comparison_inputs() -> Optional[dict[str, Any]]:
+    """Collect a shared f, a, b, n for comparison mode.
+
+    All 5 rules share this f/a/b/n shape; Rectangle Rule additionally
+    needs a `side`, which comparison mode fixes to "left" (see
+    `_run_integration_comparison` in `ui/menu.py`) rather than asking
+    for it here, since it's an implementation detail of that one rule
+    rather than part of the shared problem.
+    """
+    return collect_inputs(COMPARISON_INTEGRATION_FIELDS)
+
+
+# ----------------------------------------------------------------------
 # Matrix/vector collection (§6.3, Linear Systems)
 # ----------------------------------------------------------------------
 # Linear systems methods take a matrix + vector(s) rather than a flat
@@ -303,8 +326,7 @@ def _matrix_row_placeholder(i: int, n: int) -> str:
     template: `4` on the diagonal, `-1` on the immediate neighbors,
     `0` elsewhere. Diagonal dominance guarantees the matrix is
     non-singular, so a user who accepts every row's default by
-    pressing Enter ends up with a valid, solvable system -- not the
-    same row repeated n times (which would be singular). Diagonal
+    pressing Enter ends up with a valid, solvable system. Diagonal
     dominance is also exactly the property Jacobi/Gauss-Seidel need
     for guaranteed convergence, so the same template doubles as a
     good example there too.
@@ -330,8 +352,7 @@ def _prompt_row(label: str, n: int, placeholder: str) -> Optional[list[float]]:
 
     `placeholder` doubles as both the shown example (`instruction=`)
     and the real `default=` -- it's already validated CSV of the
-    right length, so pressing Enter submits it as-is and passes
-    `_validate_row` the same way typing it out by hand would.
+    right length, so pressing Enter submits it as-is.
     """
     import questionary
 
@@ -363,11 +384,7 @@ def collect_matrix(n: int, label: str = "A") -> Optional[list[list[float]]]:
     Each row's placeholder comes from `_matrix_row_placeholder(i, n)`
     and is wired up as a real `default=`, so it differs per row and
     the full set is non-singular whether the user types it out or
-    just presses Enter through every row -- fixes a bug where every
-    row showed the identical example (e.g. "2, -1, 0" every time)
-    with no working default, which would either produce a singular
-    matrix (if typed literally) or fail validation outright (if
-    accepted via Enter, since the hint wasn't a real default).
+    just presses Enter through every row.
     """
     rows: list[list[float]] = []
     for i in range(n):
@@ -381,10 +398,8 @@ def collect_matrix(n: int, label: str = "A") -> Optional[list[list[float]]]:
 def collect_vector(n: int, label: str = "b", placeholder: Optional[str] = None) -> Optional[list[float]]:
     """Prompt for a single length-n vector.
 
-    Defaults to a `1, 2, 3, ...` example sized to `n` (rather than a
-    fixed 3-number string like "5, -3, 2" that silently stopped
-    matching the required count once `n != 3`), wired up as a real
-    `default=` so pressing Enter accepts it. Callers that want a
+    Defaults to a `1, 2, 3, ...` example sized to `n`, wired up as a
+    real `default=` so pressing Enter accepts it. Callers that want a
     different example (e.g. an all-zero initial guess) pass their own
     `placeholder`.
     """
@@ -408,14 +423,30 @@ def collect_direct_system_inputs() -> Optional[dict[str, Any]]:
 
 
 def collect_matrix_only_inputs() -> Optional[dict[str, Any]]:
-    """Collect A only, for matrix inverse."""
+    """Collect A for matrix inverse, plus an optional b so x = A\u207b\u00b9\u00b7b
+    can also be computed and shown alongside the inverse.
+    """
+    import questionary
+
     n = _prompt_dimension("Matrix size (n)")
     if n is None:
         return None
     A = collect_matrix(n, "A")
     if A is None:
         return None
-    return {"A": A}
+
+    choice = questionary.select(
+        "Also solve x = A\u207b\u00b9\u00b7b for a right-hand-side vector b?", choices=["Skip", "Yes"]
+    ).ask()
+    if choice is None:
+        return None
+    if choice == "Skip":
+        return {"A": A}
+
+    b = collect_vector(n, "b")
+    if b is None:
+        return None
+    return {"A": A, "b": b}
 
 
 def collect_iterative_system_inputs() -> Optional[dict[str, Any]]:
@@ -450,12 +481,57 @@ def collect_iterative_system_inputs() -> Optional[dict[str, Any]]:
 
 
 # ----------------------------------------------------------------------
+# Comparison mode (§7, Linear Systems)
+# ----------------------------------------------------------------------
+
+def collect_linear_comparison_inputs() -> Optional[dict[str, Any]]:
+    """Collect a shared A, b (+ x0, tol, max_iter for the iterative pair)
+    linear system for comparison mode. Direct solvers (Gaussian
+    elimination, Gauss-Jordan) ignore x0/tol/max_iter; only Jacobi and
+    Gauss-Seidel use them.
+    """
+    import questionary
+
+    n = _prompt_dimension()
+    if n is None:
+        return None
+    A = collect_matrix(n, "A")
+    if A is None:
+        return None
+    b = collect_vector(n, "b")
+    if b is None:
+        return None
+    x0 = collect_vector(
+        n, "x0 (initial guess \u2014 Jacobi/Gauss-Seidel only)", placeholder=_vector_placeholder(n, lambda i: 0.0)
+    )
+    if x0 is None:
+        return None
+
+    tol_answer = questionary.text(
+        "tol (Jacobi/Gauss-Seidel only):", default="1e-6", validate=_validate_float, instruction="(e.g. 1e-6)"
+    ).ask()
+    if tol_answer is None:
+        return None
+    max_iter_answer = questionary.text(
+        "max_iter (Jacobi/Gauss-Seidel only):", default="100", validate=_validate_int, instruction="(e.g. 100)"
+    ).ask()
+    if max_iter_answer is None:
+        return None
+
+    return {"A": A, "b": b, "x0": x0, "tol": float(tol_answer), "max_iter": int(max_iter_answer)}
+
+
+# ----------------------------------------------------------------------
 # Point collection (§6.4, Interpolation)
 # ----------------------------------------------------------------------
 # Interpolation methods take a set of (x, y) data points plus a
 # target x, rather than the linear-systems' matrix/vector shape or
 # the nonlinear category's flat scalar fields, so they get their own
-# collectors too.
+# collectors too. `collect_variable_interpolation_inputs` below is
+# also reused directly as the comparison-mode collector for this
+# category (§7) -- it already collects exactly the shared n/xs/ys/x_target
+# shape that Lagrange, Newton Divided Difference, and Newton-Gregory
+# Forward/Backward all take.
 
 def collect_points(n: int) -> Optional[tuple[list[float], list[float]]]:
     """Prompt for n (x, y) data points, one x and one y per point.
@@ -466,11 +542,7 @@ def collect_points(n: int) -> Optional[tuple[list[float], list[float]]]:
     x-values -- a valid, non-degenerate interpolation problem, and
     also exactly what Newton-Gregory forward/backward expect. y_i
     defaults to `i**2`, tracing out a simple quadratic so the example
-    y's vary too rather than all matching. This fixes a bug where
-    every point showed the same "x=1.0 / y=2.0" example with no
-    working default -- accepting it via Enter past the first point
-    would repeat x-values (a duplicate x breaks every interpolation
-    method here).
+    y's vary too rather than all matching.
     """
     import questionary
 
@@ -530,7 +602,9 @@ def collect_cubic_inputs() -> Optional[dict[str, Any]]:
 
 
 def collect_variable_interpolation_inputs() -> Optional[dict[str, Any]]:
-    """Collect n, xs, ys, and x_target -- for Lagrange / Newton divided-difference / Newton-Gregory."""
+    """Collect n, xs, ys, and x_target -- for Lagrange / Newton divided-difference
+    / Newton-Gregory, and reused as-is for Interpolation comparison mode (§7).
+    """
     n = _prompt_dimension("Number of points (n)", default=4)
     if n is None:
         return None

@@ -174,11 +174,20 @@ def gauss_jordan(A: list[list[float]], b: list[float]) -> MethodResult:
 # Matrix Inverse
 # ----------------------------------------------------------------------
 
-def matrix_inverse(A: list[list[float]]) -> MethodResult:
-    """Gauss-Jordan on `[A | I]` until the left side is `I` (§6.3)."""
+def matrix_inverse(A: list[list[float]], b: list[float] | None = None) -> MethodResult:
+    """Gauss-Jordan on `[A | I]` until the left side is `I` (§6.3).
+
+    `b` is optional. When supplied, also computes `x = A\u207b\u00b9\u00b7b`
+    using the freshly-computed inverse and reports it as a clearly
+    labeled secondary result alongside the inverse — the inverse
+    matrix itself stays the primary output either way.
+    """
     start = time.perf_counter()
     n = _validate_matrix(A)
+    if b is not None and len(b) != n:
+        raise ValueError(f"vector b must have length {n} to match A ({n}x{n}) — got length {len(b)}")
     A0 = [row[:] for row in A]
+    b0 = list(b) if b is not None else None
     M = [list(row) + [1.0 if i == j else 0.0 for j in range(n)] for i, row in enumerate(A)]
 
     iterations: list[dict] = []
@@ -198,12 +207,20 @@ def matrix_inverse(A: list[list[float]]) -> MethodResult:
 
     inverse = [row[n:] for row in M]
 
+    inputs: dict[str, object] = {"A": A0}
+    if b0 is not None:
+        inputs["b"] = b0
+        x = [sum(inverse[i][j] * b0[j] for j in range(n)) for i in range(n)]
+        solution: object = {"Inverse (A\u207b\u00b9)": inverse, "x = A\u207b\u00b9\u00b7b": x}
+    else:
+        solution = inverse
+
     return MethodResult(
         method_name="Matrix Inverse",
         category=_CATEGORY,
-        inputs={"A": A0},
+        inputs=inputs,
         iterations=iterations,
-        solution=inverse,
+        solution=solution,
         approx_error=None,
         n_iterations=len(iterations),
         converged=True,

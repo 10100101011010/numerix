@@ -2,12 +2,21 @@
 ui/menu.py — category -> method -> input navigation (§7), via
 questionary arrow-key select menus.
 
-All four categories are fully wired to real methods. The Nonlinear
-Equations category additionally offers a "Compare Methods" entry
-(§7 comparison mode), every single-method run offers to export its
+All four categories are fully wired to real methods. Every category
+now offers a "Compare Methods" entry (§7 comparison mode) alongside
+its method list: pick 2+ methods from that category, run them on the
+same shared problem, see a summary table side by side. Each category
+defines its own "same problem" shape and its own candidate list
+(excluding methods whose required inputs or solution shape don't
+match the rest — documented next to each `_COMPARISON_*_CANDIDATES`
+dict below).
+
+The top-level menu holds the four categories plus a single Settings
+entry (currently just the plot toggle, pulled out of the category
+list) and Exit. Every single-method run offers to export its
 `MethodResult` to `results/` as CSV or JSON (§7 export), and offers
 an optional plot (§7 plotting) unless disabled via the `--no-plot`
-flag or the in-menu toggle.
+flag or the Settings toggle.
 """
 
 from __future__ import annotations
@@ -51,7 +60,7 @@ console = Console()
 _BACK = "\u00ab Back"
 _EXIT = "Exit"
 _COMPARE = "\u2696 Compare Methods"
-_TOGGLE_PLOTS = "\u2699 Toggle Plotting"
+_SETTINGS = "\u2699 Settings"
 _RESULTS_DIR = "results"
 
 
@@ -120,17 +129,56 @@ _CATEGORIES: dict[str, list[MethodEntry]] = {
 }
 
 # Comparison mode (§7): pick 2+ methods from the same category, run on
-# the same problem, show a summary table side by side. Scoped to the
-# nonlinear category per Phase 9 / §7 ("applies most usefully to the
-# nonlinear category"). "Fixed Point" is deliberately excluded: it
-# takes a rearranged g(x), not the f(x)/bracket shape shared by the
-# other four, so it can't run on "the same problem" as they can.
-_COMPARISON_CANDIDATES: dict[str, Callable[..., object]] = {
+# the same problem, show a summary table side by side. Every category
+# below defines its own candidate list, excluding any method whose
+# required inputs or solution shape doesn't match the rest of its
+# category closely enough to count as "the same problem".
+
+_COMPARISON_NONLINEAR_CANDIDATES: dict[str, Callable[..., object]] = {
     "Bisection": bisection,
     "Regula Falsi": regula_falsi,
     "Newton-Raphson": newton_raphson,
     "Secant": secant,
 }
+# "Fixed Point" is deliberately excluded: it takes a rearranged g(x),
+# not the f(x)/bracket shape shared by the other four, so it can't
+# run on "the same problem" as they can.
+
+_COMPARISON_LINEAR_CANDIDATES: dict[str, Callable[..., object]] = {
+    "Gaussian Elimination": gauss_elimination,
+    "Gauss-Jordan": gauss_jordan,
+    "Jacobi": jacobi,
+    "Gauss-Seidel": gauss_seidel,
+}
+# "Matrix Inverse" is excluded: it takes A only (no b), so it isn't
+# solving the same Ax = b problem as the other four. "LU Decomposition"
+# is excluded too: it returns a dict solution ({"x", "L", "U"}) rather
+# than a plain solution vector, which would break an apples-to-apples
+# comparison against the vector the other four return.
+
+_COMPARISON_INTERPOLATION_CANDIDATES: dict[str, Callable[..., object]] = {
+    "Lagrange Interpolation": lagrange,
+    "Newton Divided Difference": newton_divided_diff,
+    "Newton-Gregory Forward": newton_gregory_forward,
+    "Newton-Gregory Backward": newton_gregory_backward,
+}
+# "Linear", "Quadratic", and "Cubic" Interpolation are excluded: each
+# requires an exact fixed point count (2/3/4 respectively) rather
+# than the shared variable-n point set the other four accept, so they
+# can't run on "the same problem" as one another or as this group.
+
+_COMPARISON_INTEGRATION_CANDIDATES: dict[str, Callable[..., object]] = {
+    "Rectangle Rule": rectangle_rule,
+    "Midpoint Rule": midpoint_rule,
+    "Trapezoidal Rule": trapezoidal_rule,
+    "Simpson's 1/3 Rule": simpson_1_3,
+    "Simpson's 3/8 Rule": simpson_3_8,
+}
+# All five share the same f/a/b/n shape, so no exclusions here.
+# Rectangle Rule's extra "side" parameter is fixed to "left" in
+# comparison mode (see `_run_integration_comparison`) rather than
+# asked separately, since it's an implementation detail of that one
+# rule, not part of the shared problem the other four take unmodified.
 
 
 def run_menu(plot_enabled: bool = True) -> None:
@@ -138,8 +186,8 @@ def run_menu(plot_enabled: bool = True) -> None:
 
     `plot_enabled` mirrors the `--no-plot` CLI flag (§7): pass
     `plot_enabled=False` to suppress plot offers for the whole
-    session. It can also be flipped mid-session via the in-menu
-    "Toggle Plotting" entry.
+    session. It can also be flipped mid-session from the Settings
+    submenu.
 
     Imports `questionary` lazily so this module (and its navigation
     logic) can still be imported and exercised without a real TTY.
@@ -153,17 +201,36 @@ def run_menu(plot_enabled: bool = True) -> None:
         console.print(f"[dim](Plotting: {status})[/dim]")
         category = questionary.select(
             "Numerix — choose a category:",
-            choices=list(_CATEGORIES.keys()) + [_TOGGLE_PLOTS, _EXIT],
+            choices=list(_CATEGORIES.keys()) + [_SETTINGS, _EXIT],
         ).ask()
 
         if category is None or category == _EXIT:
             console.print("[dim]Goodbye.[/dim]")
             return
-        if category == _TOGGLE_PLOTS:
-            settings.plot_enabled = not settings.plot_enabled
+        if category == _SETTINGS:
+            _run_settings(settings)
             continue
 
         _run_category(category, settings)
+
+
+def _run_settings(settings: _Settings) -> None:
+    """Settings submenu: currently just the plot toggle, pulled out of
+    the top-level category list so that list holds only the four math
+    categories plus Settings and Exit.
+    """
+    import questionary
+
+    while True:
+        status = "ON" if settings.plot_enabled else "OFF"
+        choice = questionary.select(
+            "Settings:",
+            choices=[f"Toggle Plotting (currently {status})", _BACK],
+        ).ask()
+
+        if choice is None or choice == _BACK:
+            return
+        settings.plot_enabled = not settings.plot_enabled
 
 
 def _run_category(category: str, settings: _Settings) -> None:
@@ -176,17 +243,14 @@ def _run_category(category: str, settings: _Settings) -> None:
         return
 
     while True:
-        choices = [m.label for m in methods]
-        if category == "Nonlinear Equations":
-            choices.append(_COMPARE)
-        choices.append(_BACK)
+        choices = [m.label for m in methods] + [_COMPARE, _BACK]
 
         choice = questionary.select(f"{category} \u2014 choose a method:", choices=choices).ask()
 
         if choice is None or choice == _BACK:
             return
         if choice == _COMPARE:
-            _run_nonlinear_comparison()
+            _COMPARISON_RUNNERS[category]()
             continue
 
         entry = next(m for m in methods if m.label == choice)
@@ -232,7 +296,7 @@ def _run_nonlinear_comparison() -> None:
 
     selected = questionary.checkbox(
         "Select 2+ methods to compare (space to toggle, enter to confirm):",
-        choices=list(_COMPARISON_CANDIDATES.keys()),
+        choices=list(_COMPARISON_NONLINEAR_CANDIDATES.keys()),
     ).ask()
 
     if not selected:
@@ -248,7 +312,7 @@ def _run_nonlinear_comparison() -> None:
     for label in selected:
         try:
             if label in ("Bisection", "Regula Falsi"):
-                results[label] = _COMPARISON_CANDIDATES[label](f, a, b, tol=tol, max_iter=max_iter)
+                results[label] = _COMPARISON_NONLINEAR_CANDIDATES[label](f, a, b, tol=tol, max_iter=max_iter)
             elif label == "Newton-Raphson":
                 results[label] = newton_raphson(f, a, tol=tol, max_iter=max_iter)
             else:  # Secant
@@ -265,22 +329,174 @@ def _run_nonlinear_comparison() -> None:
     questionary.text("Press Enter to continue...").ask()
 
 
+def _run_linear_comparison() -> None:
+    """Pick 2+ linear-systems methods, run them on the same A, b (+ x0,
+    tol, max_iter for the iterative pair), show a summary table side
+    by side (§7).
+    """
+    import questionary
+
+    values = prompts.collect_linear_comparison_inputs()
+    if values is None:
+        return
+
+    selected = questionary.checkbox(
+        "Select 2+ methods to compare (space to toggle, enter to confirm):",
+        choices=list(_COMPARISON_LINEAR_CANDIDATES.keys()),
+    ).ask()
+
+    if not selected:
+        return
+    if len(selected) < 2:
+        render_error("pick at least 2 methods to compare.", console)
+        return
+
+    A, b, x0, tol, max_iter = values["A"], values["b"], values["x0"], values["tol"], values["max_iter"]
+    results: dict[str, object] = {}
+    errors: dict[str, str] = {}
+
+    for label in selected:
+        try:
+            if label in ("Jacobi", "Gauss-Seidel"):
+                results[label] = _COMPARISON_LINEAR_CANDIDATES[label](A, b, x0, tol=tol, max_iter=max_iter)
+            else:  # Gaussian Elimination, Gauss-Jordan -- direct, ignore x0/tol/max_iter
+                results[label] = _COMPARISON_LINEAR_CANDIDATES[label](A, b)
+        except ValueError as exc:
+            errors[label] = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            errors[label] = f"unexpected error: {exc}"
+
+    _render_comparison_table(selected, results, errors)
+
+    if results:
+        _offer_export_many(results)
+    questionary.text("Press Enter to continue...").ask()
+
+
+def _run_interpolation_comparison() -> None:
+    """Pick 2+ interpolation methods, run them on the same point set and
+    x_target, show a summary table side by side (§7).
+    """
+    import questionary
+
+    values = prompts.collect_variable_interpolation_inputs()
+    if values is None:
+        return
+
+    selected = questionary.checkbox(
+        "Select 2+ methods to compare (space to toggle, enter to confirm):",
+        choices=list(_COMPARISON_INTERPOLATION_CANDIDATES.keys()),
+    ).ask()
+
+    if not selected:
+        return
+    if len(selected) < 2:
+        render_error("pick at least 2 methods to compare.", console)
+        return
+
+    results: dict[str, object] = {}
+    errors: dict[str, str] = {}
+
+    for label in selected:
+        try:
+            results[label] = _COMPARISON_INTERPOLATION_CANDIDATES[label](**values)
+        except ValueError as exc:
+            errors[label] = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            errors[label] = f"unexpected error: {exc}"
+
+    _render_comparison_table(selected, results, errors)
+
+    if results:
+        _offer_export_many(results)
+    questionary.text("Press Enter to continue...").ask()
+
+
+def _run_integration_comparison() -> None:
+    """Pick 2+ integration rules, run them on the same f, a, b, n, show a
+    summary table side by side (§7).
+    """
+    import questionary
+
+    values = prompts.collect_integration_comparison_inputs()
+    if values is None:
+        return
+
+    selected = questionary.checkbox(
+        "Select 2+ methods to compare (space to toggle, enter to confirm):",
+        choices=list(_COMPARISON_INTEGRATION_CANDIDATES.keys()),
+    ).ask()
+
+    if not selected:
+        return
+    if len(selected) < 2:
+        render_error("pick at least 2 methods to compare.", console)
+        return
+
+    f, a, b, n = values["f"], values["a"], values["b"], values["n"]
+    results: dict[str, object] = {}
+    errors: dict[str, str] = {}
+
+    for label in selected:
+        try:
+            if label == "Rectangle Rule":
+                results[label] = rectangle_rule(f, a, b, n, side="left")
+            else:
+                results[label] = _COMPARISON_INTEGRATION_CANDIDATES[label](f, a, b, n)
+        except ValueError as exc:
+            errors[label] = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            errors[label] = f"unexpected error: {exc}"
+
+    _render_comparison_table(selected, results, errors)
+
+    if results:
+        _offer_export_many(results)
+    questionary.text("Press Enter to continue...").ask()
+
+
+_COMPARISON_RUNNERS: dict[str, Callable[[], None]] = {
+    "Nonlinear Equations": _run_nonlinear_comparison,
+    "Linear Systems": _run_linear_comparison,
+    "Interpolation": _run_interpolation_comparison,
+    "Numerical Integration": _run_integration_comparison,
+}
+
+
+def _format_comparison_result(value: Any) -> str:
+    """Compact one-line form of a `MethodResult.solution` for the
+    comparison table's Result column (float, vector, or fallback str).
+    """
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    if isinstance(value, list):
+        return "[" + ", ".join(f"{v:.6g}" if isinstance(v, float) else str(v) for v in value) + "]"
+    return str(value)
+
+
 def _render_comparison_table(order: list[str], results: dict, errors: dict) -> None:
-    """Summary table: method, iterations, final error, converged? (§7)."""
+    """Summary table: method, result, iterations, final error, converged? (§7)."""
     table = Table(title="Comparison", header_style="bold magenta")
     table.add_column("Method")
+    table.add_column("Result")
     table.add_column("Iterations", justify="right")
     table.add_column("Final Error", justify="right")
     table.add_column("Converged?")
 
     for label in order:
         if label in errors:
-            table.add_row(label, "\u2014", "\u2014", f"[red]\u2717 {errors[label]}[/red]")
+            table.add_row(label, "\u2014", "\u2014", "\u2014", f"[red]\u2717 {errors[label]}[/red]")
             continue
         result = results[label]
         converged_cell = "[green]\u2713[/green]" if result.converged else "[red]\u2717[/red]"
         error_cell = f"{result.approx_error:.6g}" if result.approx_error is not None else "\u2014"
-        table.add_row(label, str(result.n_iterations), error_cell, converged_cell)
+        table.add_row(
+            label,
+            _format_comparison_result(result.solution),
+            str(result.n_iterations),
+            error_cell,
+            converged_cell,
+        )
 
     console.print(table)
 
