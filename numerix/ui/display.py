@@ -10,6 +10,16 @@ Render order, per §7:
   banner (method name) -> input recap panel -> iteration table
   -> result panel -> stats footer -> converged/warning indicator
   (✓ green / ⚠ yellow / ✗ red)
+
+The stats footer is method-aware (design/usability pass, pre-Phase
+11): methods with a genuine convergence loop (bounded by tol/
+max_iter) keep the "Iterations" label and show an "Approx. Error"
+column; direct/tabular methods (linear solvers built as an
+elimination/decomposition table, interpolation, integration formulas)
+have no natural approximate-error concept, so that column is omitted
+entirely rather than showing a dash, and the count column is
+relabeled "Data Points" (interpolation) or "Table Size" (everything
+else direct/tabular).
 """
 
 from __future__ import annotations
@@ -22,6 +32,17 @@ from rich.panel import Panel
 from rich.table import Table
 
 from numerix.utils.result import MethodResult
+
+# Neutral placeholder for a missing/blank iteration-table cell (e.g. a
+# higher Newton-Gregory order that a given row doesn't reach).
+_BLANK_CELL = "\u00b7"
+
+# Methods with a genuine convergence loop (bounded by tol/max_iter),
+# as opposed to a direct/tabular computation. Nonlinear solvers are
+# always iterative; within Linear Systems, only Jacobi/Gauss-Seidel
+# are (the rest -- Gaussian elimination, Gauss-Jordan, matrix
+# inverse, LU -- are direct, just organized as a step-by-step table).
+_ITERATIVE_LINEAR_METHODS = {"Jacobi", "Gauss-Seidel"}
 
 
 def render_result(result: MethodResult, console: Console | None = None) -> None:
@@ -90,7 +111,7 @@ def _render_iterations(result: MethodResult, console: Console) -> None:
     for col in columns:
         table.add_column(col, justify="right")
     for row in result.iterations:
-        table.add_row(*[_format_cell(row.get(col, "")) for col in columns])
+        table.add_row(*[_format_cell(row.get(col)) for col in columns])
 
     console.print(table)
 
@@ -100,15 +121,20 @@ def _render_solution(result: MethodResult, console: Console) -> None:
 
 
 def _render_stats(result: MethodResult, console: Console) -> None:
+    iterative = _is_iterative(result)
+
     table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
-    table.add_column("Iterations", justify="right")
-    table.add_column("Approx. Error", justify="right")
+    table.add_column(_count_label(result), justify="right")
+    if iterative:
+        table.add_column("Approx. Error", justify="right")
     table.add_column("Exec Time", justify="right")
-    table.add_row(
-        str(result.n_iterations),
-        _format_number(result.approx_error) if result.approx_error is not None else "—",
-        f"{result.exec_time_ms:.3f} ms",
-    )
+
+    row = [str(result.n_iterations)]
+    if iterative:
+        row.append(_format_number(result.approx_error) if result.approx_error is not None else "—")
+    row.append(f"{result.exec_time_ms:.3f} ms")
+
+    table.add_row(*row)
     console.print(table)
 
 
@@ -126,6 +152,28 @@ def _render_status(result: MethodResult, console: Console) -> None:
 
 
 # ----------------------------------------------------------------------
+# Method-awareness helpers for the stats footer
+# ----------------------------------------------------------------------
+
+def _is_iterative(result: MethodResult) -> bool:
+    """True for methods with a genuine tol/max_iter convergence loop."""
+    if result.category == "Nonlinear Equations":
+        return True
+    if result.category == "Linear Systems":
+        return result.method_name in _ITERATIVE_LINEAR_METHODS
+    return False
+
+
+def _count_label(result: MethodResult) -> str:
+    """Label for the stats footer's leading count column."""
+    if _is_iterative(result):
+        return "Iterations"
+    if result.category == "Interpolation":
+        return "Data Points"
+    return "Table Size"
+
+
+# ----------------------------------------------------------------------
 # Formatting helpers
 # ----------------------------------------------------------------------
 
@@ -138,6 +186,10 @@ def _format_number(value: float) -> str:
 
 
 def _format_cell(value: Any) -> str:
+    if value is None:
+        return _BLANK_CELL
+    if isinstance(value, str) and value.strip() == "":
+        return _BLANK_CELL
     if isinstance(value, bool):
         return "✓" if value else "✗"
     if isinstance(value, float):
