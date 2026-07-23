@@ -11,12 +11,28 @@ defines its own "same problem" shape and its own candidate list
 match the rest — documented next to each `_COMPARISON_*_CANDIDATES`
 dict below).
 
-The top-level menu holds the four categories plus a single Settings
-entry (currently just the plot toggle, pulled out of the category
-list) and Exit. Every single-method run offers to export its
-`MethodResult` to `results/` as CSV or JSON (§7 export), and offers
-an optional plot (§7 plotting) unless disabled via the `--no-plot`
-flag or the Settings toggle.
+The top-level menu holds the four categories plus a Help/About entry,
+a single Settings entry (currently just the plot toggle, pulled out
+of the category list), and Exit. Every single-method run offers to
+export its `MethodResult` to `results/` as CSV or JSON (§7 export),
+and offers an optional plot (§7 plotting) unless disabled via the
+`--no-plot` flag or the Settings toggle.
+
+Phase 11 polish pass (§7/§8 "no raw traceback ever reaches the
+user"): every core-method call already raises only `ValueError` for
+bad domains/singular matrices/malformed functions/invalid brackets,
+and each of the five call sites that invoke one (`_run_method`, the
+four `_run_*_comparison` functions) already catches `ValueError`
+specifically for a clean message, then `Exception` generally as its
+own last-resort net. `_run_safely` below is the *outer* layer on top
+of that: it wraps every dispatch out of the menu loop itself --
+input collection, comparison-mode input collection, rendering,
+export, plotting, and the category/settings/help dispatch — so a bug
+anywhere in that surrounding UI code (not just inside a core-method
+call) still degrades to one friendly line instead of a crash.
+`EOFError`/`KeyboardInterrupt` are deliberately re-raised through it
+so a closed/interrupted session still exits cleanly via `main.py`
+rather than looping on repeated error messages.
 """
 
 from __future__ import annotations
@@ -25,6 +41,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from numerix.core.integration import (
@@ -61,6 +78,7 @@ _BACK = "\u00ab Back"
 _EXIT = "Exit"
 _COMPARE = "\u2696 Compare Methods"
 _SETTINGS = "\u2699 Settings"
+_HELP = "? Help / About"
 _RESULTS_DIR = "results"
 
 
@@ -181,6 +199,32 @@ _COMPARISON_INTEGRATION_CANDIDATES: dict[str, Callable[..., object]] = {
 # rule, not part of the shared problem the other four take unmodified.
 
 
+def _run_safely(fn: Callable[..., None], *args: Any) -> None:
+    """Last-resort safety net (§7/§8): run `fn`, and if anything escapes
+    it beyond the ValueError/Exception handling `fn` already does
+    around its own core-method call, catch it here and print one
+    friendly line instead of letting a raw traceback reach the user.
+
+    This is the *outer* layer, used at every dispatch point out of
+    the menu loop (`_run_method`, each comparison runner, Settings,
+    Help) -- so a bug in the surrounding UI code (input collection,
+    rendering, export, plotting, the menu loop itself) is covered
+    too, not just the core-method call each of those already guards
+    internally.
+
+    `EOFError`/`KeyboardInterrupt` are re-raised untouched so a
+    closed/interrupted session still exits cleanly through the
+    handler in `main.py`, instead of this net catching them and the
+    loop immediately hitting the same closed input again.
+    """
+    try:
+        fn(*args)
+    except (EOFError, KeyboardInterrupt):
+        raise
+    except Exception as exc:  # noqa: BLE001
+        render_error(f"unexpected error: {exc}", console)
+
+
 def run_menu(plot_enabled: bool = True) -> None:
     """Top-level menu loop: category -> method -> input -> result -> loop.
 
@@ -201,17 +245,20 @@ def run_menu(plot_enabled: bool = True) -> None:
         console.print(f"[dim](Plotting: {status})[/dim]")
         category = questionary.select(
             "Numerix — choose a category:",
-            choices=list(_CATEGORIES.keys()) + [_SETTINGS, _EXIT],
+            choices=list(_CATEGORIES.keys()) + [_HELP, _SETTINGS, _EXIT],
         ).ask()
 
         if category is None or category == _EXIT:
             console.print("[dim]Goodbye.[/dim]")
             return
+        if category == _HELP:
+            _run_safely(_run_help)
+            continue
         if category == _SETTINGS:
-            _run_settings(settings)
+            _run_safely(_run_settings, settings)
             continue
 
-        _run_category(category, settings)
+        _run_safely(_run_category, category, settings)
 
 
 def _run_settings(settings: _Settings) -> None:
@@ -233,6 +280,52 @@ def _run_settings(settings: _Settings) -> None:
         settings.plot_enabled = not settings.plot_enabled
 
 
+def _run_help() -> None:
+    """Help/About screen (§7 polish pass), reachable from the top-level
+    menu. Method list and count are built from `_CATEGORIES` itself
+    rather than hardcoded, so this can never drift out of sync with
+    what's actually registered.
+    """
+    import questionary
+
+    method_lines = "\n".join(
+        f"  [bold]{category}[/bold]: {', '.join(m.label for m in methods)}"
+        for category, methods in _CATEGORIES.items()
+        if methods
+    )
+    total_methods = sum(len(methods) for methods in _CATEGORIES.values())
+
+    body = (
+        "[bold cyan]Numerix[/bold cyan] — classical numerical methods, in your terminal.\n\n"
+        f"Implements {total_methods} methods across four categories, entirely from first "
+        "principles (no library solvers — Gaussian elimination, Newton-Raphson, and the "
+        "rest are all hand-written). Every result renders through one consistent format: "
+        "input recap \u2192 iteration table \u2192 result \u2192 stats/converged footer.\n\n"
+        "[bold]Methods by category[/bold]\n"
+        f"{method_lines}\n\n"
+        "[bold]Navigating[/bold]\n"
+        "  Up/Down + Enter to choose. In Compare Methods, Space toggles a checkbox and "
+        "Enter confirms the selection. Esc / Ctrl+C backs out of any prompt or submenu.\n\n"
+        "[bold]Defaults[/bold]\n"
+        "  tol = 1e-6 and max_iter = 100 on every iterative method (Bisection, Regula "
+        "Falsi, Fixed Point, Newton-Raphson, Secant, Jacobi, Gauss-Seidel) — both are "
+        "pre-filled on the prompt and can be overridden by typing a different value.\n\n"
+        "[bold]Typing functions[/bold]\n"
+        "  Plain math text, e.g. x**3 - x - 2, sin(x) - x/2. Allowed: sin, cos, tan, asin, "
+        "acos, atan, sinh, cosh, tanh, exp, log, ln, sqrt, abs, floor, ceiling, pi, e.\n\n"
+        "[bold]After a run[/bold]\n"
+        "  Every result (single or comparison) can be exported to results/ as CSV or "
+        "JSON, and — if plotting is on in Settings — shown as an optional matplotlib "
+        "plot.\n\n"
+        "[bold]Errors[/bold]\n"
+        "  Invalid brackets, singular matrices, malformed functions, bad domains, and "
+        "non-convergence all show one short message here, never a raw error trace."
+    )
+
+    console.print(Panel(body, title="Help / About", border_style="cyan"))
+    questionary.text("Press Enter to return to the menu...").ask()
+
+
 def _run_category(category: str, settings: _Settings) -> None:
     import questionary
 
@@ -250,16 +343,20 @@ def _run_category(category: str, settings: _Settings) -> None:
         if choice is None or choice == _BACK:
             return
         if choice == _COMPARE:
-            _COMPARISON_RUNNERS[category]()
+            _run_safely(_COMPARISON_RUNNERS[category])
             continue
 
         entry = next(m for m in methods if m.label == choice)
-        _run_method(entry, settings)
+        _run_safely(_run_method, entry, settings)
 
 
 def _run_method(entry: MethodEntry, settings: _Settings) -> None:
     import questionary
 
+    # entry.collect() and everything below it (render/export/plot) are
+    # covered by the _run_safely() wrap around this whole call in
+    # _run_category — only the core-method call right below gets its
+    # own narrower ValueError handling, for a cleaner message.
     values = entry.collect()
     if values is None:
         return  # user cancelled input part-way through

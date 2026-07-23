@@ -18,6 +18,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from numerix.ui.display import render_error
 from numerix.ui.menu import run_menu
 
 # Generated once via pyfiglet (font="standard") and pinned here as a
@@ -69,6 +70,13 @@ def main() -> None:
         run_menu(plot_enabled=not args.no_plot)
     except (EOFError, KeyboardInterrupt):
         print("\nGoodbye.")
+    except Exception as exc:  # noqa: BLE001 -- absolute last resort, per §8
+        # Every dispatch inside run_menu's own loop is already wrapped by
+        # _run_safely (ui/menu.py), so in practice nothing should reach
+        # here. This exists purely so a bug in the loop's own control
+        # flow -- outside any of those wrapped dispatches -- still ends
+        # in one friendly line instead of a raw traceback on exit.
+        render_error(f"unexpected error: {exc}", Console())
 
 
 if __name__ == "__main__":
