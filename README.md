@@ -2,7 +2,7 @@
 
 Classical numerical methods, in your terminal.
 
-[![Tests](https://github.com/10100101011010/numerix/actions/workflows/test.yml/badge.svg)](https://github.com/<OWNER>/numerix/actions/workflows/test.yml)
+[![Tests](https://github.com/10100101011010/numerix/actions/workflows/test.yml/badge.svg)](https://github.com/10100101011010/numerix/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 <!--
