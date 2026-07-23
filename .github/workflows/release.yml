@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # PyInstaller can't cross-compile (§9) -- each binary is built on
+      # the OS it targets. os_name/arch feed the §9 naming convention
+      # (numerix-{version}-{os}-{arch}); macos-latest runners are
+      # Apple Silicon, hence arm64 there vs. x64 on windows/linux.
+      matrix:
+        include:
+          - os: windows-latest
+            os_name: windows
+            arch: x64
+          - os: macos-latest
+            os_name: macos
+            arch: arm64
+          - os: ubuntu-latest
+            os_name: linux
+            arch: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Derive version from tag
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build binary
+        run: pyinstaller --onefile --name numerix-${{ env.VERSION }}-${{ matrix.os_name }}-${{ matrix.arch }} numerix/main.py
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          # Matches both the .exe PyInstaller appends on Windows and the
+          # extension-less binary it produces on macOS/Linux. Each of the
+          # three matrix legs uploads its own asset to this same tag's
+          # release, so all three binaries land on one GitHub Release.
+          files: dist/numerix-${{ env.VERSION }}-${{ matrix.os_name }}-${{ matrix.arch }}*
